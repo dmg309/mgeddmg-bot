@@ -15,7 +15,7 @@ from telegram.ext import (
 import yt_dlp
 
 # ────────────────────────────────────────────────
-TOKEN = "8547768233:AAE1iXvAxsezWwEeYpLMFbZ7Jx_o042ZyoE"          # ضع توكن البوت هنا
+TOKEN = "8546899518:AAG8DJc6HV6pffpiGBpzrUf-HawRZts3zvA"          # ضع توكن البوت هنا
 # ────────────────────────────────────────────────
 
 logging.basicConfig(
