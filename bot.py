@@ -1,10 +1,9 @@
 # bot_downloader.py
-# شغّله: python bot_downloader.py
-
 import logging
 import os
 import tempfile
 import random
+import requests
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -16,7 +15,11 @@ from telegram.ext import (
 import yt_dlp
 
 # ────────────────────────────────────────────────
-TOKEN = "8546899518:AAG8DJc6HV6pffpiGBpzrUf-HawRZts3zvA"          # ضع توكن البوت هنا
+# على Railway → استخدم Environment Variables
+TOKEN = os.getenv("8546899518:AAG8DJc6HV6pffpiGBpzrUf-HawRZts3zvA")
+if not TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN مطلوب في الـ Environment Variables على Railway")
+
 # ────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -24,165 +27,129 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# قوائم الردود العشوائية
-WELCOME_MESSAGES = [
-    "مرحبا يا {name} 👋 جاهز أحمل لك أي فيديو تبيه؟",
-    "أهلين {name} 🔥 ارمي الرابط وخليني أشتغل!",
-    "يا هلا والله {name} 📥 وش تبي نحمله اليوم؟",
-    "مرحباً بـ {name} في عالم التحميل السريع 😈",
-    "هلا {name}! يلا وريني الرابط اللي مخبيه...",
+# قوائم الردود (ابقِ عليها كما هي أو أضف المزيد)
+WELCOME_MESSAGES = [...]   # ضع القائمة اللي عندك
+LOADING_MESSAGES = [...] 
+SUCCESS_MESSAGES = [...]
+LARGE_FILE_MESSAGES = [
+    "الفيديو كبير ({size:.1f} ميجا) 📦\nما أقدر أرسله مباشرة داخل تليجرام، جاري رفعه على سيرفر خارجي...",
+    "فيديو ثقيل يا {name} ({size:.1f} MB) 💾\nبرفعه لك رابط تحميل مباشر، انتظر شوي...",
 ]
+ERROR_AGE_MESSAGES = [...]     # كما عندك
+ERROR_GEO_MESSAGES = [...]
+GENERAL_ERROR_MESSAGES = [...]
 
-LOADING_MESSAGES = [
-    "جاري التحميل يا {name}... انتظر شوي ⏳",
-    "خلاص يا {name}، ماسك الرابط وأنا أجيبه لك 🔥",
-    "يلا يا {name}، البوت شغال بقوة الآن 💪",
-    "ثواني بس يا {name}... الفيديو في الطريق 📡",
-    "أمسك يا {name}، أنا داخل أجيب الفيديو حالا 🚀",
-]
-
-SUCCESS_MESSAGES = [
-    "هاك يا {name}، نزلته لك نظيف 📥",
-    "جاهز يا {name}! استمتع بالفيديو 😎",
-    "خلصت يا {name}، حمل ولا تقلي شكراً 😂",
-    "تفضل يا {name}، الفيديو على طبق من ذهب ✨",
-    "تم يا {name}! الفيديو تحت أمرك 🔥",
-]
-
-ERROR_AGE_MESSAGES = [
-    "يا {name}، الفيديو مقيد بالعمر 😕 جرب فيديو عام أو غيّر الحساب",
-    "معليش يا {name}، يوتيوب يبي تسجيل دخول عشان العمر...",
-]
-
-ERROR_GEO_MESSAGES = [
-    "يا {name}، الفيديو غير متاح في منطقتك 🚫 جرب VPN",
-    "الفيديو محجوب جغرافياً يا {name} 😔",
-]
-
-GENERAL_ERROR_MESSAGES = [
-    "معليش يا {name}، ما قدرت أحمله 😔 الرابط ممكن غلط أو المحتوى مقيد",
-    "حصل خطأ يا {name} 😅 جرب رابط ثاني أو انتظر شوي",
-]
-
-# إعدادات yt-dlp (نسخة محسنة)
 ydl_opts = {
     'quiet': True,
     'no_warnings': True,
     'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-    'outtmpl': '%(title)s.%(ext)s',
+    'outtmpl': '%(title).200s.%(ext)s',
     'noplaylist': True,
     'continuedl': True,
+    'retries': 10,
+    'fragment_retries': 10,
     'no_check_certificate': True,
+    'geo_bypass': True,
 }
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    name = user.first_name or "الغالي"
-    msg = random.choice(WELCOME_MESSAGES).format(name=name)
-    await update.message.reply_text(msg)
+def upload_to_catbox(file_path):
+    try:
+        url = "https://catbox.moe/user/api.php"
+        with open(file_path, 'rb') as f:
+            files = {'fileToUpload': f}
+            data = {'reqtype': 'fileupload'}
+            r = requests.post(url, files=files, data=data, timeout=900)  # 15 دقيقة timeout
+        if r.status_code == 200 and "https://files.catbox.moe/" in r.text:
+            return r.text.strip()
+        logger.error(f"Catbox فشل: {r.text[:200]}")
+        return None
+    except Exception as e:
+        logger.error(f"خطأ في Catbox: {e}")
+        return None
 
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    name = user.first_name or "الغالي"
-    text = (
-        f"يا {name}، البوت يساعدك تحمل فيديوهات من:\n"
-        "• يوتيوب\n• تيك توك\n• إنستغرام\n• تويتر/X\n• سناب (أحياناً)\n"
-        "وكثير مواقع ثانية 📹\n\n"
-        "كيف تستخدمه؟\n"
-        "فقط أرسل الرابط مباشرة وسأحمله لك 😎\n\n"
-        "الأوامر:\n"
-        "/start - ترحيب جديد\n"
-        "/help - هذه الرسالة"
-    )
-    await update.message.reply_text(text)
-
+# start و help_command تبقى كما هي
 
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
-
     if not url.startswith(("http://", "https://")):
-        await update.message.reply_text("يا بعدي، أرسل رابط يبدأ بـ http أو https من فضلك 😅")
+        await update.message.reply_text("أرسل رابط يبدأ بـ http أو https من فضلك 😅")
         return
 
     user = update.effective_user
     name = user.first_name or "الغالي"
-
-    # رسالة تحميل عشوائية
     loading_text = random.choice(LOADING_MESSAGES).format(name=name)
     status_msg = await update.message.reply_text(loading_text)
 
     try:
-        # محاولة تحديث yt-dlp تلقائياً (اختياري - قد لا يعمل على بعض السيرفرات)
-        try:
-            yt_dlp.utils.update_self()
-            logger.info("yt-dlp تم تحديثه تلقائياً")
-        except:
-            pass
-
         with tempfile.TemporaryDirectory() as tmpdirname:
-            ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(title)s.%(ext)s')
-
+            ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(title).200s.%(ext)s')
+            
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(info)
 
             if not os.path.exists(filename):
-                await status_msg.edit_text(f"يا {name}، تعذّر العثور على الملف بعد التحميل 😕")
+                await status_msg.edit_text("تعذّر العثور على الملف بعد التحميل 😕")
                 return
 
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
+            title = info.get('title', 'فيديو بدون عنوان')
 
-            if file_size_mb > 50:
+            # محاولة إرسال مباشر (حد 50MB)
+            if file_size_mb <= 50:
+                await status_msg.edit_text("جاري الإرسال داخل تليجرام... 📤")
+                with open(filename, 'rb') as video_file:
+                    await update.message.reply_document(
+                        document=video_file,
+                        caption=f"تم التحميل: {title}\n{url}\nالحجم: {file_size_mb:.1f} ميجا",
+                        filename=os.path.basename(filename)
+                    )
+                await update.message.reply_text(random.choice(SUCCESS_MESSAGES).format(name=name))
+            else:
+                # الملف كبير → رفع خارجي
                 await status_msg.edit_text(
-                    f"يا {name}، الفيديو كبير جدًا ({file_size_mb:.1f} ميجا)\n"
-                    "تليجرام يحدد 50 ميجا للبوتات العادية.\nجرب رابط أقصر."
+                    random.choice(LARGE_FILE_MESSAGES).format(name=name, size=file_size_mb)
                 )
-                return
-
-            await status_msg.edit_text("جاري الإرسال... 📤")
-
-            with open(filename, 'rb') as video_file:
-                await update.message.reply_document(
-                    document=video_file,
-                    caption=f"تم التحميل: {info.get('title', 'فيديو')}\n{url}",
-                    filename=os.path.basename(filename)
-                )
-
-            # رسالة نجاح عشوائية بعد الإرسال
-            success_text = random.choice(SUCCESS_MESSAGES).format(name=name)
-            await update.message.reply_text(success_text)
+                upload_url = upload_to_catbox(filename)
+                if upload_url:
+                    await update.message.reply_text(
+                        f"هاك رابط التحميل المباشر (بدون حد حجم):\n**{upload_url}**\n\n"
+                        f"العنوان: {title}\n"
+                        f"الحجم: {file_size_mb:.1f} ميجا\n\n"
+                        "الرابط يشتغل لفترة محدودة، حمل بسرعة! 🚀"
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"يا {name}، الفيديو كبير ({file_size_mb:.1f} ميجا) وحصل خطأ في الرفع 😔\n"
+                        "جرب رابط أصغر أو انتظر شوي وكرر المحاولة."
+                    )
 
             await status_msg.delete()
 
     except yt_dlp.utils.DownloadError as e:
+        # معالجة أخطاء yt-dlp (عمر، جيو، إلخ) كما عندك سابقاً
         error_str = str(e).lower()
         if any(x in error_str for x in ["age", "sign in", "restricted", "login"]):
             msg = random.choice(ERROR_AGE_MESSAGES).format(name=name)
         elif any(x in error_str for x in ["geo", "not available", "unavailable in"]):
             msg = random.choice(ERROR_GEO_MESSAGES).format(name=name)
         else:
-            msg = random.choice(GENERAL_ERROR_MESSAGES).format(name=name) + f"\nالخطأ: {str(e)[:80]}..."
-        
+            msg = random.choice(GENERAL_ERROR_MESSAGES).format(name=name) + f"\n{str(e)[:100]}..."
         await status_msg.edit_text(msg)
         logger.error(e)
 
     except Exception as e:
-        msg = f"حصل خطأ غريب يا {name} 😅\nجرب مرة ثانية أو أرسل الرابط مرة أخرى"
-        await status_msg.edit_text(msg)
+        await status_msg.edit_text(f"حصل خطأ غير متوقع يا {name} 😅 جرب مرة ثانية")
         logger.error(e, exc_info=True)
-
 
 def main():
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
-
-    print("البوت يعمل...")
+    
+    print("البوت شغال على Railway...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
