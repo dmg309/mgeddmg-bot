@@ -6,22 +6,14 @@ import os
 import tempfile
 import random
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 import yt_dlp
 
 # ────────────────────────────────────────────────
-TOKEN = "8546899518:AAG8DJc6HV6pffpiGBpzrUf-HawRZts3zvA"          # ضع توكن البوت هنا
+TOKEN = "8546899518:AAG8DJc6HV6pffpiGBpzrUf-HawRZts3zvA"
 # ────────────────────────────────────────────────
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # قوائم الردود العشوائية
@@ -64,30 +56,38 @@ GENERAL_ERROR_MESSAGES = [
     "حصل خطأ يا {name} 😅 جرب رابط ثاني أو انتظر شوي",
 ]
 
-# إعدادات yt-dlp (نسخة محسنة)
 ydl_opts = {
     'quiet': True,
     'no_warnings': True,
-    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
     'outtmpl': '%(title)s.%(ext)s',
     'noplaylist': True,
     'continuedl': True,
     'no_check_certificate': True,
+    'extractor_args': {
+        'snapchat': {
+            'no_watermark': True,
+            'prefer_no_watermark': True,
+        }
+    },
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Snapchat/12.0.0',
+    },
 }
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext):
     user = update.effective_user
     name = user.first_name or "الغالي"
     msg = random.choice(WELCOME_MESSAGES).format(name=name)
-    await update.message.reply_text(msg)
+    update.message.reply_text(msg)
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def help_command(update: Update, context: CallbackContext):
     user = update.effective_user
     name = user.first_name or "الغالي"
     text = (
         f"يا {name}، البوت يساعدك تحمل فيديوهات من:\n"
-        "• يوتيوب\n• تيك توك\n• إنستغرام\n• تويتر/X\n• سناب (أحياناً)\n"
+        "• يوتيوب\n• تيك توك\n• إنستغرام\n• تويتر/X\n• سناب (أحياناً بدون علامة مائية)\n"
         "وكثير مواقع ثانية 📹\n\n"
         "كيف تستخدمه؟\n"
         "فقط أرسل الرابط مباشرة وسأحمله لك 😎\n\n"
@@ -95,25 +95,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - ترحيب جديد\n"
         "/help - هذه الرسالة"
     )
-    await update.message.reply_text(text)
+    update.message.reply_text(text)
 
 
-async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def download_video(update: Update, context: CallbackContext):
     url = update.message.text.strip()
 
     if not url.startswith(("http://", "https://")):
-        await update.message.reply_text("يا بعدي، أرسل رابط يبدأ بـ http أو https من فضلك 😅")
+        update.message.reply_text("يا بعدي، أرسل رابط يبدأ بـ http أو https من فضلك 😅")
         return
 
     user = update.effective_user
     name = user.first_name or "الغالي"
 
-    # رسالة تحميل عشوائية
     loading_text = random.choice(LOADING_MESSAGES).format(name=name)
-    status_msg = await update.message.reply_text(loading_text)
+    status_msg = update.message.reply_text(loading_text)
 
     try:
-        # محاولة تحديث yt-dlp تلقائياً (اختياري - قد لا يعمل على بعض السيرفرات)
         try:
             yt_dlp.utils.update_self()
             logger.info("yt-dlp تم تحديثه تلقائياً")
@@ -128,32 +126,31 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 filename = ydl.prepare_filename(info)
 
             if not os.path.exists(filename):
-                await status_msg.edit_text(f"يا {name}، تعذّر العثور على الملف بعد التحميل 😕")
+                status_msg.edit_text(f"يا {name}، تعذّر العثور على الملف بعد التحميل 😕")
                 return
 
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
 
-            if file_size_mb > 50:
-                await status_msg.edit_text(
+            if file_size_mb > 200:
+                status_msg.edit_text(
                     f"يا {name}، الفيديو كبير جدًا ({file_size_mb:.1f} ميجا)\n"
-                    "تليجرام يحدد 50 ميجا للبوتات العادية.\nجرب رابط أقصر."
+                    "تليجرام يحدد 200 ميجا للبوتات العادية.\nجرب رابط أقصر."
                 )
                 return
 
-            await status_msg.edit_text("جاري الإرسال... 📤")
+            status_msg.edit_text("جاري الإرسال... 📤")
 
             with open(filename, 'rb') as video_file:
-                await update.message.reply_document(
+                update.message.reply_document(
                     document=video_file,
                     caption=f"تم التحميل: {info.get('title', 'فيديو')}\n{url}",
                     filename=os.path.basename(filename)
                 )
 
-            # رسالة نجاح عشوائية بعد الإرسال
             success_text = random.choice(SUCCESS_MESSAGES).format(name=name)
-            await update.message.reply_text(success_text)
+            update.message.reply_text(success_text)
 
-            await status_msg.delete()
+            status_msg.delete()
 
     except yt_dlp.utils.DownloadError as e:
         error_str = str(e).lower()
@@ -164,25 +161,28 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             msg = random.choice(GENERAL_ERROR_MESSAGES).format(name=name) + f"\nالخطأ: {str(e)[:80]}..."
         
-        await status_msg.edit_text(msg)
+        status_msg.edit_text(msg)
         logger.error(e)
 
     except Exception as e:
         msg = f"حصل خطأ غريب يا {name} 😅\nجرب مرة ثانية أو أرسل الرابط مرة أخرى"
-        await status_msg.edit_text(msg)
+        status_msg.edit_text(msg)
         logger.error(e, exc_info=True)
 
 
 def main():
-    app = Application.builder().token(TOKEN).build()
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("help", help_command))
+
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, download_video))
 
     print("البوت يعمل...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    updater.start_polling()
+    updater.idle()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
