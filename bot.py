@@ -6,16 +6,25 @@ import os
 import tempfile
 import random
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 import yt_dlp
 
 # ────────────────────────────────────────────────
-TOKEN = "8546899518:AAG8DJc6HV6pffpiGBpzrUf-HawRZts3zvA"
+TOKEN = "8546899518:AAG8DJc6HV6pffpiGBpzrUf-HawRZts3zvA"          # ضع توكن البوت هنا
 # ────────────────────────────────────────────────
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
+# قوائم الردود العشوائية
 WELCOME_MESSAGES = [
     "مرحبا يا {name} 👋 جاهز أحمل لك أي فيديو تبيه؟",
     "أهلين {name} 🔥 ارمي الرابط وخليني أشتغل!",
@@ -29,6 +38,7 @@ LOADING_MESSAGES = [
     "خلاص يا {name}، ماسك الرابط وأنا أجيبه لك 🔥",
     "يلا يا {name}، البوت شغال بقوة الآن 💪",
     "ثواني بس يا {name}... الفيديو في الطريق 📡",
+    "أمسك يا {name}، أنا داخل أجيب الفيديو حالا 🚀",
 ]
 
 SUCCESS_MESSAGES = [
@@ -36,6 +46,7 @@ SUCCESS_MESSAGES = [
     "جاهز يا {name}! استمتع بالفيديو 😎",
     "خلصت يا {name}، حمل ولا تقلي شكراً 😂",
     "تفضل يا {name}، الفيديو على طبق من ذهب ✨",
+    "تم يا {name}! الفيديو تحت أمرك 🔥",
 ]
 
 ERROR_AGE_MESSAGES = [
@@ -53,47 +64,62 @@ GENERAL_ERROR_MESSAGES = [
     "حصل خطأ يا {name} 😅 جرب رابط ثاني أو انتظر شوي",
 ]
 
+# إعدادات yt-dlp (نسخة محسنة)
 ydl_opts = {
     'quiet': True,
     'no_warnings': True,
-    'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
     'outtmpl': '%(title)s.%(ext)s',
     'noplaylist': True,
     'continuedl': True,
     'no_check_certificate': True,
 }
 
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     name = user.first_name or "الغالي"
     msg = random.choice(WELCOME_MESSAGES).format(name=name)
-    update.message.reply_text(msg)
+    await update.message.reply_text(msg)
 
-def help_command(update: Update, context: CallbackContext):
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     name = user.first_name or "الغالي"
     text = (
         f"يا {name}، البوت يساعدك تحمل فيديوهات من:\n"
         "• يوتيوب\n• تيك توك\n• إنستغرام\n• تويتر/X\n• سناب (أحياناً)\n"
         "وكثير مواقع ثانية 📹\n\n"
-        "ارسل الرابط مباشرة وسأحمله لك 😎"
+        "كيف تستخدمه؟\n"
+        "فقط أرسل الرابط مباشرة وسأحمله لك 😎\n\n"
+        "الأوامر:\n"
+        "/start - ترحيب جديد\n"
+        "/help - هذه الرسالة"
     )
-    update.message.reply_text(text)
+    await update.message.reply_text(text)
 
-def download_video(update: Update, context: CallbackContext):
+
+async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
 
     if not url.startswith(("http://", "https://")):
-        update.message.reply_text("يا بعدي، أرسل رابط يبدأ بـ http أو https من فضلك 😅")
+        await update.message.reply_text("يا بعدي، أرسل رابط يبدأ بـ http أو https من فضلك 😅")
         return
 
     user = update.effective_user
     name = user.first_name or "الغالي"
 
+    # رسالة تحميل عشوائية
     loading_text = random.choice(LOADING_MESSAGES).format(name=name)
-    status_msg = update.message.reply_text(loading_text)
+    status_msg = await update.message.reply_text(loading_text)
 
     try:
+        # محاولة تحديث yt-dlp تلقائياً (اختياري - قد لا يعمل على بعض السيرفرات)
+        try:
+            yt_dlp.utils.update_self()
+            logger.info("yt-dlp تم تحديثه تلقائياً")
+        except:
+            pass
+
         with tempfile.TemporaryDirectory() as tmpdirname:
             ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(title)s.%(ext)s')
 
@@ -102,50 +128,61 @@ def download_video(update: Update, context: CallbackContext):
                 filename = ydl.prepare_filename(info)
 
             if not os.path.exists(filename):
-                status_msg.edit_text(f"يا {name}، تعذّر العثور على الملف بعد التحميل 😕")
+                await status_msg.edit_text(f"يا {name}، تعذّر العثور على الملف بعد التحميل 😕")
                 return
 
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
 
             if file_size_mb > 50:
-                status_msg.edit_text(
+                await status_msg.edit_text(
                     f"يا {name}، الفيديو كبير جدًا ({file_size_mb:.1f} ميجا)\n"
                     "تليجرام يحدد 50 ميجا للبوتات العادية.\nجرب رابط أقصر."
                 )
                 return
 
-            status_msg.edit_text("جاري الإرسال... 📤")
+            await status_msg.edit_text("جاري الإرسال... 📤")
 
             with open(filename, 'rb') as video_file:
-                update.message.reply_document(
+                await update.message.reply_document(
                     document=video_file,
                     caption=f"تم التحميل: {info.get('title', 'فيديو')}\n{url}",
                     filename=os.path.basename(filename)
                 )
 
+            # رسالة نجاح عشوائية بعد الإرسال
             success_text = random.choice(SUCCESS_MESSAGES).format(name=name)
-            update.message.reply_text(success_text)
+            await update.message.reply_text(success_text)
 
-            status_msg.delete()
+            await status_msg.delete()
 
-    except Exception as e:
-        status_msg.edit_text(f"حصل خطأ يا {name} 😢\nجرب مرة ثانية")
+    except yt_dlp.utils.DownloadError as e:
+        error_str = str(e).lower()
+        if any(x in error_str for x in ["age", "sign in", "restricted", "login"]):
+            msg = random.choice(ERROR_AGE_MESSAGES).format(name=name)
+        elif any(x in error_str for x in ["geo", "not available", "unavailable in"]):
+            msg = random.choice(ERROR_GEO_MESSAGES).format(name=name)
+        else:
+            msg = random.choice(GENERAL_ERROR_MESSAGES).format(name=name) + f"\nالخطأ: {str(e)[:80]}..."
+        
+        await status_msg.edit_text(msg)
         logger.error(e)
 
+    except Exception as e:
+        msg = f"حصل خطأ غريب يا {name} 😅\nجرب مرة ثانية أو أرسل الرابط مرة أخرى"
+        await status_msg.edit_text(msg)
+        logger.error(e, exc_info=True)
+
+
 def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+    app = Application.builder().token(TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_command))
-
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, download_video))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
 
     print("البوت يعمل...")
-    updater.start_polling()
-    updater.idle()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-    
