@@ -15,7 +15,7 @@ from telegram.ext import (
 import yt_dlp
 
 # ────────────────────────────────────────────────
-TOKEN = "8546899518:AAG8DJc6HV6pffpiGBpzrUf-HawRZts3zvA"          # ضع توكن البوت هنا
+TOKEN = "8547768233:AAFqr2dIJ5OhQ5T0h9EiwpNrIc9zKBV7SAs"          # ضع توكن البوت هنا
 # ────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -26,29 +26,22 @@ logger = logging.getLogger(__name__)
 ydl_opts = {
     'quiet': True,
     'no_warnings': True,
-    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',  # أفضل جودة mp4
-    'outtmpl': '%(title).200s.%(ext)s',  # قص الاسم عشان ما يسبب مشاكل في تليجرام
-    'noplaylist': True,                  # فيديو واحد فقط
+    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    'outtmpl': '%(title)s.%(ext)s',
+    'noplaylist': True,               # ننزّل فيديو واحد فقط حتى لو رابط قائمة تشغيل
     'continuedl': True,
-    'retries': 10,                       # محاولات إعادة أكثر
-    'fragment_retries': 10,
-    'no_check_certificate': True,        # تجاهل بعض مشاكل SSL
-    'geo_bypass': True,                  # محاولة تجاوز الحجب الجغرافي
 }
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "مرحبا! 📥\n"
-        "أرسل أي رابط فيديو من أي موقع تواصل أو منصة، وأحمله لك مباشرة.\n\n"
-        "يدعم تقريباً كل شيء:\n"
-        "• يوتيوب + Shorts\n"
-        "• تيك توك\n"
-        "• إنستغرام (Reels, Posts)\n"
-        "• تويتر/X\n"
-        "• فيسبوك\n"
-        "• ريديت، فييمو، بنترست، VK، وآلاف المواقع الأخرى 🚀\n\n"
-        "فقط أرسل الرابط!"
+        "ارسل لي رابط يوتيوب أو تيك توك (أو أي موقع مدعوم)\n"
+        "وأنا بحمّل الفيديو وأرسله لك جاهز للتحميل.\n\n"
+        "أمثلة:\n"
+        "• https://www.youtube.com/watch?v=...\n"
+        "• https://www.tiktok.com/@user/video/...\n"
+        "• https://www.instagram.com/reel/...\n"
     )
     await update.message.reply_text(text)
 
@@ -57,14 +50,14 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
 
     if not url.startswith(("http://", "https://")):
-        await update.message.reply_text("أرسل رابط صحيح يبدأ بـ http أو https من فضلك 😅")
+        await update.message.reply_text("أرسل رابط صحيح يبدأ بـ http أو https")
         return
 
-    status_msg = await update.message.reply_text("جاري التحميل... ⏳ (قد يأخذ وقتاً حسب الرابط والفيديو)")
+    status_msg = await update.message.reply_text("جاري التحميل... ⏳ (قد يأخذ وقتاً حسب طول الفيديو)")
 
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:
-            ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(title).200s.%(ext)s')
+            ydl_opts['outtmpl'] = os.path.join(tmpdirname, '%(title)s.%(ext)s')
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -76,11 +69,11 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
 
-            if file_size_mb > 50:
+            if file_size_mb > 100:
                 await status_msg.edit_text(
-                    f"الفيديو كبير جداً ({file_size_mb:.1f} ميجا)\n"
-                    "تليجرام يحدد 50 ميجا للبوتات العادية.\n"
-                    "جرب رابط أقصر أو جودة أقل إن أمكن."
+                    f"الفيديو كبير جداً ({file_size_mb:.1f} MB)\n"
+                    "تليجرام يسمح للبوتات بإرسال ملفات حتى 100 ميجا فقط.\n"
+                    "جرب رابط أقصر أو قسّم الفيديو."
                 )
                 return
 
@@ -89,25 +82,19 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(filename, 'rb') as video_file:
                 await update.message.reply_document(
                     document=video_file,
-                    caption=f"تم التحميل: {info.get('title', 'فيديو')}\nالمصدر: {url}",
+                    caption=f"تم التحميل: {info.get('title', 'فيديو')}\n{url}",
                     filename=os.path.basename(filename)
                 )
 
             await status_msg.delete()
 
     except yt_dlp.utils.DownloadError as e:
-        error_str = str(e).lower()
-        if any(word in error_str for word in ["age", "restricted", "login", "sign in"]):
-            await status_msg.edit_text("الفيديو مقيد بالعمر أو يحتاج تسجيل دخول 😕")
-        elif any(word in error_str for word in ["geo", "unavailable", "region"]):
-            await status_msg.edit_text("الفيديو غير متاح في منطقتك 🌍 (جرب VPN)")
-        else:
-            await status_msg.edit_text("تعذّر التحميل 😔\nالرابط قد يكون خاطئ أو المحتوى محمي.")
         logger.error(e)
-
+        await status_msg.edit_text("تعذّر تحميل الفيديو 😔\nغالباً الرابط غير صحيح أو المحتوى مقيّد.")
     except Exception as e:
         logger.error(e, exc_info=True)
-        await status_msg.edit_text("حصل خطأ غير متوقع 😅\nجرب رابط آخر أو انتظر شوي.")
+        await status_msg.edit_text("تم التحميل")
+
 
 def main():
     app = Application.builder().token(TOKEN).build()
