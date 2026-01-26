@@ -4,14 +4,20 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from yt_dlp.utils import DownloadError, UnsupportedError
 
-# مجلد تحميل الفيديوهات
+# مجلد مؤقت للتحميل
 DOWNLOAD_FOLDER = "downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# إعدادات yt-dlp
-def get_ydl_opts(user):
+MAX_FILE_SIZE_MB = 50  # الحد الأقصى للحجم المسموح به على Telegram
+
+def get_ydl_opts(user, force_low_quality=False):
+    # إذا الفيديو كبير، نخفض الجودة
+    format_choice = 'bestvideo+bestaudio/best'
+    if force_low_quality:
+        format_choice = 'bv[height<=480]+ba/best[height<=480]/best'
+
     return {
-        'format': 'bestvideo+bestaudio/best',
+        'format': format_choice,
         'outtmpl': os.path.join(DOWNLOAD_FOLDER, f'%(title)s-{user}.%(ext)s'),
         'noplaylist': True,
         'quiet': True,
@@ -21,43 +27,56 @@ def get_ydl_opts(user):
         }
     }
 
-# تحقق من الروابط المدعومة
 def is_supported_url(url: str) -> bool:
     supported_domains = ['youtube.com', 'youtu.be', 'tiktok.com', 'vimeo.com']
     return any(domain in url for domain in supported_domains)
 
-# رسالة /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "مرحباً! أرسل رابط فيديو من YouTube أو TikTok أو Vimeo لتحميله.\n"
-        "ملاحظة: روابط الصور أو الخاصة على TikTok غير مدعومة."
+        "سيتم تقليل جودة الفيديو تلقائيًا إذا كان حجمه كبيرًا."
     )
 
-# معالجة الرسائل
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     user = update.message.from_user.username or update.message.from_user.first_name
 
     if not is_supported_url(url):
-        await update.message.reply_text(
-            "❌ هذا الرابط غير مدعوم.\n"
-            "استخدم روابط فيديو من YouTube أو TikTok أو Vimeo."
-        )
+        await update.message.reply_text("❌ هذا الرابط غير مدعوم.")
         return
 
     await update.message.reply_text("⏳ جاري تحميل الفيديو...")
 
+    force_low_quality = False
+
     try:
-        ydl_opts = get_ydl_opts(user)
+        ydl_opts = get_ydl_opts(user, force_low_quality)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-        await update.message.reply_text(f"✅ تم تحميل الفيديو بنجاح:\n{filename}")
+
+        # التحقق من حجم الفيديو
+        size_mb = os.path.getsize(filename) / (1024*1024)
+        if size_mb > MAX_FILE_SIZE_MB:
+            # إعادة تحميل الفيديو بجودة منخفضة
+            await update.message.reply_text(
+                f"⚠️ حجم الفيديو {size_mb:.2f}MB، سيتم تنزيل نسخة بجودة أقل..."
+            )
+            force_low_quality = True
+            ydl_opts = get_ydl_opts(user, force_low_quality)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+
+        # إرسال الفيديو
+        with open(filename, "rb") as video_file:
+            await update.message.reply_video(video_file, caption=f"✅ تم تحميل الفيديو: {info.get('title')}")
+
+        os.remove(filename)
 
     except UnsupportedError:
         await update.message.reply_text(
-            "❌ الرابط غير مدعوم للتحميل. "
-            "قد يكون رابط صورة أو فيديو خاص على TikTok."
+            "❌ الرابط غير مدعوم للتحميل. ربما رابط صورة أو فيديو خاص."
         )
     except DownloadError as e:
         msg = str(e)
@@ -66,12 +85,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif "Private" in msg or "Login" in msg:
             reason = "الفيديو خاص أو يتطلب تسجيل الدخول."
         else:
-            reason = "خطأ غير معروف أثناء التحميل."
+            reason = "خطأ أثناء التحميل."
         await update.message.reply_text(f"❌ تعذر تحميل الفيديو: {reason}")
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ غير متوقع:\n{e}")
 
-# تشغيل البوت
 if __name__ == "__main__":
     TOKEN = "8547768233:AAFqr2dIJ5OhQ5T0h9EiwpNrIc9zKBV7SAs"
     app = ApplicationBuilder().token(TOKEN).build()
