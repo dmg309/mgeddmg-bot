@@ -1,68 +1,67 @@
 import os
-import re
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
 
+# تضع هنا توكن البوت
 TOKEN = "8547768233:AAFqr2dIJ5OhQ5T0h9EiwpNrIc9zKBV7SAs"
 
-# نمط بسيط للتحقق من روابط YouTube
-YOUTUBE_REGEX = r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+'
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "أرسل رابط فيديو من YouTube لتحميله!\n"
-        "سأتعرف على الرابط فقط ولن أحاول تحميل أي نص آخر."
-    )
+    await update.message.reply_text("مرحباً! أرسل رابط الفيديو ليتم تحميله.")
 
-def download_video(url: str, filename: str) -> str:
-    ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',
-        'outtmpl': filename,  # حفظ الفيديو مباشرة باسم المستخدم
-        'noplaylist': True,
-        'quiet': True,
-        'retries': 5,
-        'fragment_retries': 5,
-        'ignoreerrors': True,
-        'nocheckcertificate': True,
-        'user_agent': 'Mozilla/5.0'
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.extract_info(url, download=True)
+async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message.text
+    user_name = update.message.from_user.first_name
 
-    if not os.path.exists(filename) or os.path.getsize(filename) == 0:
-        raise Exception("تم تحميل ملف فارغ أو الرابط غير صالح!")
-    return filename
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    
-    # التحقق هل النص رابط YouTube
-    if not re.match(YOUTUBE_REGEX, text):
-        await update.message.reply_text("الرجاء إرسال رابط YouTube صالح فقط!")
+    # تحقق سريع من أن الرسالة تحتوي رابط
+    if not message.startswith("http"):
+        await update.message.reply_text("الرجاء إرسال رابط صالح للفيديو.")
         return
 
-    url = text
-    user_name = update.message.from_user.first_name
-    safe_name = "".join(c if c.isalnum() else "_" for c in user_name)
-    out_file = f"{safe_name}.mp4"
+    await update.message.reply_text(f"جارٍ تحميل الفيديو باسم {user_name}...")
+
+    filename = f"{user_name}_video.%(ext)s"
+    ydl_opts = {
+        'format': 'best',  # تحميل أفضل نسخة متاحة (فيديو وصوت مدمجين)
+        'outtmpl': filename,
+        'noplaylist': True,
+        'quiet': True,
+        'ignoreerrors': True,
+        'nocheckcertificate': True,
+        'user_agent': 'Mozilla/5.0',
+    }
 
     try:
-        await update.message.reply_text(f"جارٍ تحميل الفيديو باسم {safe_name}...")
-        download_video(url, out_file)
-        with open(out_file, "rb") as f:
-            await update.message.reply_video(f)
-        await update.message.reply_text("تم التحميل والإرسال بنجاح!")
-        os.remove(out_file)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(message, download=True)
+            if info is None:
+                await update.message.reply_text("فشل التحميل: الرابط غير صالح أو محمي.")
+                return
+
+            # الحصول على اسم الملف النهائي
+            downloaded_file = ydl.prepare_filename(info)
+
+            # تحقق من حجم الملف
+            if not os.path.exists(downloaded_file) or os.path.getsize(downloaded_file) < 1000:
+                await update.message.reply_text("تم تحميل ملف فارغ أو الرابط غير صالح!")
+                return
+
+            # إرسال الفيديو للمستخدم
+            await update.message.reply_video(video=open(downloaded_file, 'rb'), caption=f"تم تحميل الفيديو بنجاح باسم {user_name}!")
+
+            # حذف الملف بعد الإرسال لتوفير مساحة
+            os.remove(downloaded_file)
+
     except Exception as e:
-        await update.message.reply_text(f"حدث خطأ أثناء التحميل:\n{e}")
+        await update.message.reply_text(f"حدث خطأ أثناء التحميل: {str(e)}")
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), download_video))
 
+    print("Bot started...")
     app.run_polling()
 
 if __name__ == "__main__":
