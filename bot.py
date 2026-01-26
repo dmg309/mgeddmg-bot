@@ -1,6 +1,6 @@
 import os
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 import yt_dlp
 
 # ===== إعداد المجلد لحفظ الفيديوهات =====
@@ -34,31 +34,30 @@ def download_video(url: str):
         return filename
 
 # ===== استقبال الفيديوهات =====
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     sender_name = update.message.from_user.first_name
 
     try:
-        update.message.reply_text(f"جارٍ تحميل الفيديو، {sender_name}...")
+        await update.message.reply_text(f"جارٍ تحميل الفيديو، {sender_name}...")
         file_path = download_video(url)
 
         if file_path and os.path.exists(file_path):
-            update.message.reply_video(video=open(file_path, "rb"), caption=f"تم التحميل بنجاح، {sender_name}!")
+            await update.message.reply_video(video=open(file_path, "rb"), caption=f"تم التحميل بنجاح، {sender_name}!")
         else:
-            update.message.reply_text(f"عذرًا، لم أتمكن من تحميل الفيديو، {sender_name}. ربما الرابط غير مدعوم.")
+            await update.message.reply_text(f"عذرًا، لم أتمكن من تحميل الفيديو، {sender_name}. ربما الرابط غير مدعوم.")
     except Exception as e:
-        update.message.reply_text(f"حدث خطأ أثناء التحميل، {sender_name}.\n{str(e)}")
+        await update.message.reply_text(f"حدث خطأ أثناء التحميل، {sender_name}.\n{str(e)}")
 
 # ===== تشغيل البوت =====
 def main():
     TOKEN = "8547768233:AAFqr2dIJ5OhQ5T0h9EiwpNrIc9zKBV7SAs"
-    updater = Updater(TOKEN)
-    dp = updater.dispatcher
 
-    dp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    updater.start_polling()
-    updater.idle()
+    print("البوت شغال...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
